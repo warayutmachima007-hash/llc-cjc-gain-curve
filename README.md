@@ -14,7 +14,7 @@ An interactive explainer showing why an LLC resonant converter's gain can rise a
 - **The gain curve vs F<sub>s</sub>/F<sub>R</sub>.** You can sweep C<sub>jc</sub> (0–5 nF) and the load (100 Ω – 10 kΩ).
 - **One toggle per parasitic:** L<sub>lks</sub>, C<sub>TR</sub> and C<sub>jc</sub>. Toggling them shows that **only C<sub>jc</sub>** makes the gain rise with frequency.
 - **Readouts from the paper's equations:** F<sub>R</sub> (eq. 3), the F<sub>R</sub> shift from L<sub>lks</sub> (eq. 4), the gain at F<sub>R</sub> (eq. 6) and the extra resonance F<sub>JC</sub> (eq. 9).
-- **Load-step simulation:** a behavioural, averaged simulation with frequency control. Load steps from 100 Ω to a light load and back. With C<sub>jc</sub>, the controller raises f<sub>s</sub> past the gain minimum, the gain rises instead of falling, and V<sub>O</sub> runs away while f<sub>s</sub> pins at its limit. This is the regulation failure the paper describes. (The controller, lag and limits are illustrative, not from the paper.)
+- **Load step on the gain curve:** watch the operating point jump from the full-load curve to the light-load curve, then follow the frequency controller along it. With C<sub>jc</sub>, the light-load curve bends back up above the target, so raising f<sub>s</sub> raises the gain, the loop runs away to f<sub>s,max</sub>, and V<sub>O</sub> overshoots. The panel has Play and a time scrubber, plus V<sub>O</sub>(t) alongside. It's a behavioural (averaged) simulation, and the controller, lag and limits are illustrative, not from the paper.
 - **The paper's four fixes:** dummy load, limiting F<sub>s,max</sub>, rectifier type, and low-Q design.
 
 ## Source

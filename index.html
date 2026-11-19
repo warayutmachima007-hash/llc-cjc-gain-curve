@@ -58,7 +58,7 @@ footer{font-size:11.5px;color:var(--mut);padding:4px 22px 18px;max-width:1100px;
 .circ svg.hot .gs{filter:drop-shadow(0 0 4px currentColor)}
 .circ .box{stroke:#9aa8b4;stroke-dasharray:3 3;fill:none}
 .circ .off{opacity:.18}
-.stepcharts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stepcharts{display:grid;grid-template-columns:1.25fr 1fr;gap:12px}
 @media(max-width:800px){.stepcharts{grid-template-columns:1fr}}
 button.pre{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;font-size:12.5px;cursor:pointer;color:var(--navy)}
 button.pre:hover{border-color:var(--red);color:var(--red)}
@@ -105,7 +105,7 @@ button.pre:hover{border-color:var(--red);color:var(--red)}
   <div class="out" id="out"></div>
 
   <div class="card" id="stepcard">
-    <div class="ttl">Load-step simulation: what C<sub>jc</sub> does to regulation</div>
+    <div class="ttl">Load step on the gain curve: full load ⇄ light load</div>
     <div class="sliders" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:8px">
       <div class="ctl"><label><span>Input voltage V<sub>S</sub></span> <b id="v-vs"></b></label>
         <input type="range" id="vs" min="385" max="440" step="1" value="400">
@@ -120,12 +120,18 @@ button.pre:hover{border-color:var(--red);color:var(--red)}
           <button class="pre" data-c="3">C<sub>jc</sub> = 3 nF</button></div>
         <small>Sets the C<sub>jc</sub> slider at the top</small></div>
     </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 8px">
+      <button class="pre" id="play" style="min-width:74px">▶ Play</button>
+      <input type="range" id="tt" min="0" max="14" step="0.02" value="0" style="flex:1;accent-color:#0f2a44">
+      <b id="v-tt" style="font-variant-numeric:tabular-nums;min-width:62px;text-align:right;color:#0f2a44"></b>
+    </div>
+    <div id="phase" style="font-size:13.5px;background:#f4f7f9;border-radius:8px;padding:8px 12px;margin-bottom:8px;min-height:40px"></div>
     <div class="stepcharts">
-      <div><div class="chartbox" style="height:260px"><canvas id="svo"></canvas></div></div>
-      <div><div class="chartbox" style="height:260px"><canvas id="sfs"></canvas></div></div>
+      <div><div class="chartbox" style="height:330px"><canvas id="sg"></canvas></div></div>
+      <div><div class="chartbox" style="height:330px"><canvas id="svo"></canvas></div></div>
     </div>
     <div class="out" id="sout" style="margin-top:10px"></div>
-    <div class="note">Behavioural (averaged) simulation, not switching-level. The output follows the FHA steady-state gain of the Fig. 12 model with a 0.2 ms first-order lag. A PI controller sets f<sub>s</sub> to regulate V<sub>O</sub> = 206 V, limited to 0.5–5·F<sub>R</sub>. The lag, controller gains, frequency limits and V<sub>S</sub> scaling are illustrative choices, not values from the paper. FHA has no losses, so the size of the overshoot is exaggerated, especially at large C<sub>jc</sub>. The direction of the failure is what matters: once f<sub>s</sub> passes the gain minimum, raising it raises V<sub>O</sub>. Red = with your C<sub>jc</sub> · dashed grey = C<sub>jc</sub> = 0.</div>
+    <div class="note">Behavioural (averaged) simulation, not switching-level. The output follows the FHA steady-state gain of the Fig. 12 model with a 0.2 ms first-order lag. A PI controller sets f<sub>s</sub> to regulate V<sub>O</sub> = 206 V, limited to 0.5–5·F<sub>R</sub>. The lag, controller gains, frequency limits and V<sub>S</sub> scaling are illustrative choices, not values from the paper. FHA has no losses, so the size of the overshoot is exaggerated, especially at large C<sub>jc</sub>. The direction of the failure is what matters: once f<sub>s</sub> passes the gain minimum, raising it raises V<sub>O</sub>. Left: the active load's curve is drawn bold, and the dot is the operating point (f<sub>s</sub>, gain at the present load), with its recent path as a trail. Right: V<sub>O</sub>(t) with your C<sub>jc</sub> (red) and with C<sub>jc</sub> = 0 (dashed grey).</div>
   </div>
 
   <div class="why">
@@ -321,32 +327,36 @@ const shade={id:'shade',beforeDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}
   const x1=x.getPixelForValue(T1),x2=x.getPixelForValue(T2);ctx.save();ctx.fillStyle='rgba(214,69,69,.06)';
   ctx.fillRect(x1,a.top,x2-x1,a.bottom-a.top);ctx.fillStyle='#d64545';ctx.font='11px sans-serif';ctx.textAlign='center';
   ctx.fillText('light load',(x1+x2)/2,a.top+12);ctx.restore();}};
-const mk=(id,ytitle)=>new Chart(document.getElementById(id),{type:'line',data:{datasets:[]},
+const ST={now:0,sim:null,ref:null,curves:null,rl:2000,playing:false};
+const mk=(id,ytitle,xt,xmin,xmax,plug)=>new Chart(document.getElementById(id),{type:'line',data:{datasets:[]},
   options:{animation:false,maintainAspectRatio:false,parsing:false,elements:{point:{radius:0}},interaction:{mode:'nearest',intersect:false},
-  scales:{x:{type:'linear',min:0,max:TEND,title:{display:true,text:'time (ms)'}},y:{title:{display:true,text:ytitle}}},
-  plugins:{legend:{labels:{filter:i=>!i.text.startsWith('_'),boxHeight:2}},tooltip:{callbacks:{title:t=>t[0].parsed.x.toFixed(2)+' ms',label:t=>t.dataset.label.replace(/^_/,'')+': '+t.parsed.y.toFixed(2)}}}},plugins:[shade]});
-const cVo=mk('svo','Vo (V)'), cFs=mk('sfs','Fs / FR');
+  scales:{x:{type:'linear',min:xmin,max:xmax,title:{display:true,text:xt}},y:{title:{display:true,text:ytitle}}},
+  plugins:{legend:{labels:{filter:i=>!i.text.startsWith('_'),boxHeight:2}},tooltip:{filter:i=>!i.dataset.label.startsWith('_'),callbacks:{label:t=>t.dataset.label+': '+t.parsed.y.toFixed(3)}}}},plugins:plug});
+const playhead={id:'playhead',afterDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}}=ch;const px=x.getPixelForValue(ST.now);
+  ctx.save();ctx.strokeStyle='#0f2a44';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.restore();}};
+const cG=mk('sg','Gain (normalized)','Fs / FR',0.5,5,[]), cVo=mk('svo','Vo (V)','time (ms)',0,TEND,[shade,playhead]);
+const loadAt=ms=>(ms>=T1&&ms<T2)?ST.rl:100;
 function updateStep(cj,opt){
   const vs=+document.getElementById('vs').value, rl=100*Math.pow(100,+document.getElementById('rl').value);
   document.getElementById('v-vs').textContent=vs+' V';
   document.getElementById('v-rl').textContent=fR(rl);
-  const a=simStep(cj,opt,vs,rl), b=simStep(0,{...opt,J:false},vs,rl);
+  ST.rl=rl; ST.cj=cj; ST.opt=opt;
+  ST.sim=simStep(cj,opt,vs,rl); ST.ref=simStep(0,{...opt,J:false},vs,rl);
+  const a=ST.sim,b=ST.ref;
   document.getElementById('v-mref').textContent=a.Mref.toFixed(3);
+  const XS=[...Array(220)].map((_,i)=>0.5+4.5*i/219);
+  ST.curves={full:XS.map(x=>({x,y:gain(x,100,cj,opt)})),light:XS.map(x=>({x,y:gain(x,rl,cj,opt)})),
+    light0:XS.map(x=>({x,y:gain(x,rl,0,{...opt,J:false})}))};
   const xy=(t,y)=>t.map((x,i)=>({x,y:y[i]}));
   const lab=opt.J?`Cjc = ${(cj*1e9).toFixed(1)} nF`:'Cjc off';
   cVo.data.datasets=[{label:lab,data:xy(a.t,a.v),borderColor:'#d64545',borderWidth:2.2},
     {label:'Cjc = 0',data:xy(b.t,b.v),borderColor:'#7b8a97',borderWidth:1.5,borderDash:[6,4]},
     {label:'_target',data:[{x:0,y:VON},{x:TEND,y:VON}],borderColor:'#1f9d55',borderWidth:1,borderDash:[2,2]}];
   const all=a.v.concat(b.v); cVo.options.scales.y.min=Math.floor(Math.min(...all,VON)/5)*5-5; cVo.options.scales.y.max=Math.ceil(Math.max(...all,VON)/5)*5+5;
-  cFs.data.datasets=[{label:lab,data:xy(a.t,a.f),borderColor:'#d64545',borderWidth:2.2},
-    {label:'Cjc = 0',data:xy(b.t,b.f),borderColor:'#7b8a97',borderWidth:1.5,borderDash:[6,4]},
-    {label:'_fmax',data:[{x:0,y:5},{x:TEND,y:5}],borderColor:'#0f2a44',borderWidth:1,borderDash:[2,2]}];
-  cFs.options.scales.y.min=0.5; cFs.options.scales.y.max=5.3;
-  cVo.update(); cFs.update();
+  cVo.update();
   const win=(r)=>r.v.filter((_,i)=>r.t[i]>=T1&&r.t[i]<T2);
   const pk=r=>Math.max(...win(r)), endL=r=>r.v[r.t.findIndex(x=>x>=T2)-1], sat=r=>r.f[r.t.findIndex(x=>x>=T2)-1]>4.99;
-  const startOK=Math.abs(a.v[0]-VON)<0.5;
-  const ok=Math.abs(endL(a)-VON)<1;
+  const startOK=Math.abs(a.v[0]-VON)<0.5, ok=Math.abs(endL(a)-VON)<1;
   document.getElementById('sout').innerHTML=`
     <div class="kpi"><div class="l">Full load before the step</div><div class="n">${a.v[0].toFixed(1)} V</div>
       <div class="s ${startOK?'ok':'bad'}">${startOK?'✓ Regulated':'✗ Cannot reach the target even at full load: gain never drops to '+a.Mref.toFixed(3)}</div></div>
@@ -354,8 +364,49 @@ function updateStep(cj,opt){
       <div class="s">${((pk(a)/VON-1)*100).toFixed(1)}% over 206 V · C<sub>jc</sub> = 0: ${pk(b).toFixed(1)} V</div></div>
     <div class="kpi"><div class="l">V<sub>O</sub> at end of light load (8.9 ms)</div><div class="n">${endL(a).toFixed(1)} V</div>
       <div class="s ${ok?'ok':'bad'}">${ok?'✓ Back in regulation':(sat(a)?'✗ f<sub>s</sub> pinned at 5·F<sub>R</sub>: raising f<sub>s</sub> past the gain minimum <i>raised</i> the gain, so the loop ran away':'✗ Not regulated')}</div></div>`;
+  drawStepFrame();
 }
-document.querySelectorAll('button.pre').forEach(b=>b.addEventListener('click',()=>{
+function drawStepFrame(){
+  const a=ST.sim, now=ST.now, k=Math.min(a.t.length-1,Math.round(now/(a.t[1]-a.t[0])));
+  const light=loadAt(now)!==100, fs=a.f[k], Mop=gain(fs,loadAt(now),ST.cj,ST.opt);
+  const trail=[];for(let i=Math.max(0,k-60);i<=k;i++)trail.push({x:a.f[i],y:gain(a.f[i],loadAt(a.t[i]),ST.cj,ST.opt)});
+  const lab=ST.opt.J?` (Cjc ${(ST.cj*1e9).toFixed(1)} nF)`:'';
+  cG.data.datasets=[
+    {label:'Full load 100 Ω'+lab,data:ST.curves.full,borderColor:light?'rgba(15,42,68,.3)':'#0f2a44',borderWidth:light?1.5:3},
+    {label:`Light load ${fR(ST.rl)}`+lab,data:ST.curves.light,borderColor:light?'#d98a1c':'rgba(217,138,28,.35)',borderWidth:light?3:1.5},
+    {label:`Light load, Cjc = 0`,data:ST.curves.light0,borderColor:'rgba(123,138,151,.7)',borderWidth:1.2,borderDash:[6,4]},
+    {label:'Target gain M = '+a.Mref.toFixed(3),data:[{x:0.5,y:a.Mref},{x:5,y:a.Mref}],borderColor:'#1f9d55',borderWidth:1.2,borderDash:[3,3]},
+    {label:'_trail',data:trail,borderColor:'rgba(214,69,69,.45)',borderWidth:2},
+    {label:'_op',data:[{x:fs,y:Mop}],showLine:false,pointRadius:8,pointBackgroundColor:'#d64545',pointBorderColor:'#fff',pointBorderWidth:2}];
+  const ys=ST.curves.full.concat(ST.curves.light).map(p=>p.y).filter((_,i)=>true);
+  cG.options.scales.y.min=Math.min(0.7,Math.floor(Math.min(...ys)*20)/20);
+  cG.options.scales.y.max=Math.max(1.3,Math.min(3,Math.ceil(Math.max(...ys.filter((y,i)=>true))*10)/10));
+  cG.update(); cVo.update();
+  document.getElementById('v-tt').textContent=now.toFixed(2)+' ms';
+  document.getElementById('tt').value=now;
+  // phase narration
+  const Mmin=Math.min(...ST.curves.light.filter(p=>p.x>=1).map(p=>p.y));
+  let txt;
+  if(now<T1) txt=`<b>Full load.</b> The controller sits at f<sub>s</sub> = ${fs.toFixed(2)}·F<sub>R</sub>, where the full-load curve meets the target gain ${a.Mref.toFixed(3)}. V<sub>O</sub> = ${a.v[k].toFixed(1)} V.`;
+  else if(now<T2){
+    const jumped=now<T1+0.6;
+    if(jumped) txt=`<b>Load steps to ${fR(ST.rl)}.</b> The operating point jumps from the full-load curve to the light-load curve <i>at the same f<sub>s</sub></i>, where the gain is ${Mop.toFixed(3)}. V<sub>O</sub> starts to rise, so the controller raises f<sub>s</sub>.`;
+    else if(Mmin<=a.Mref) txt=`<b>Light load, regulated.</b> The light-load curve still falls below the target (min ${Mmin.toFixed(3)}), so raising f<sub>s</sub> to ${fs.toFixed(2)}·F<sub>R</sub> brings V<sub>O</sub> back to ${a.v[k].toFixed(1)} V.`;
+    else txt=`<b>Light load: regulation lost.</b> C<sub>jc</sub> bends the light-load curve back up (min ${Mmin.toFixed(3)}, above the target ${a.Mref.toFixed(3)}). Raising f<sub>s</sub> past that minimum <i>raises</i> the gain, so the loop runs away to f<sub>s</sub> = ${fs.toFixed(2)}·F<sub>R</sub>, and V<sub>O</sub> = ${a.v[k].toFixed(1)} V.`;
+  } else txt=`<b>Load returns to 100 Ω.</b> The point drops back to the full-load curve, and the controller lowers f<sub>s</sub> to ${fs.toFixed(2)}·F<sub>R</sub>. V<sub>O</sub> = ${a.v[k].toFixed(1)} V.`;
+  document.getElementById('phase').innerHTML=txt;
+}
+document.getElementById('tt').addEventListener('input',e=>{ST.now=+e.target.value;stopPlay();drawStepFrame();});
+let raf=null,lastTs=0;
+function stopPlay(){ST.playing=false;cancelAnimationFrame(raf);document.getElementById('play').textContent='▶ Play';}
+document.getElementById('play').addEventListener('click',()=>{
+  if(ST.playing){stopPlay();return;}
+  if(ST.now>=TEND-0.01)ST.now=0;
+  ST.playing=true;document.getElementById('play').textContent='❚❚ Pause';lastTs=0;
+  const step=ts=>{if(!ST.playing)return;if(lastTs){ST.now=Math.min(TEND,ST.now+(ts-lastTs)/1000*1.6);}lastTs=ts;
+    drawStepFrame();if(ST.now>=TEND){stopPlay();return;}raf=requestAnimationFrame(step);};
+  raf=requestAnimationFrame(step);});
+document.querySelectorAll('button.pre[data-c]').forEach(b=>b.addEventListener('click',()=>{
   document.getElementById('pJ').checked=true;const s=document.getElementById('cj');s.value=b.dataset.c;s.dispatchEvent(new Event('input'));}));
 ['vs','rl'].forEach(id=>document.getElementById(id).addEventListener('input',update));
 let hotT;
