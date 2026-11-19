@@ -58,6 +58,10 @@ footer{font-size:11.5px;color:var(--mut);padding:4px 22px 18px;max-width:1100px;
 .circ svg.hot .gs{filter:drop-shadow(0 0 4px currentColor)}
 .circ .box{stroke:#9aa8b4;stroke-dasharray:3 3;fill:none}
 .circ .off{opacity:.18}
+.stepcharts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:800px){.stepcharts{grid-template-columns:1fr}}
+button.pre{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;font-size:12.5px;cursor:pointer;color:var(--navy)}
+button.pre:hover{border-color:var(--red);color:var(--red)}
 </style>
 </head>
 <body>
@@ -99,6 +103,30 @@ footer{font-size:11.5px;color:var(--mut);padding:4px 22px 18px;max-width:1100px;
   </div>
 
   <div class="out" id="out"></div>
+
+  <div class="card" id="stepcard">
+    <div class="ttl">Load-step simulation: what C<sub>jc</sub> does to regulation</div>
+    <div class="sliders" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:8px">
+      <div class="ctl"><label><span>Input voltage V<sub>S</sub></span> <b id="v-vs"></b></label>
+        <input type="range" id="vs" min="385" max="440" step="1" value="400">
+        <small>Tank designed for M = 1 at F<sub>R</sub> at 385 V, so a higher V<sub>S</sub> needs M = <span id="v-mref"></span></small></div>
+      <div class="ctl"><label><span>Light-load step R<sub>O</sub></span> <b id="v-rl"></b></label>
+        <input type="range" id="rl" min="0" max="1" step="0.01" value="0.65">
+        <small>Load steps 100 Ω → this value at 2 ms, then back to 100 Ω at 9 ms</small></div>
+      <div class="ctl"><label><span>Try a case</span><b></b></label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <button class="pre" data-c="0">C<sub>jc</sub> = 0</button>
+          <button class="pre" data-c="1">C<sub>jc</sub> = 1 nF</button>
+          <button class="pre" data-c="3">C<sub>jc</sub> = 3 nF</button></div>
+        <small>Sets the C<sub>jc</sub> slider at the top</small></div>
+    </div>
+    <div class="stepcharts">
+      <div><div class="chartbox" style="height:260px"><canvas id="svo"></canvas></div></div>
+      <div><div class="chartbox" style="height:260px"><canvas id="sfs"></canvas></div></div>
+    </div>
+    <div class="out" id="sout" style="margin-top:10px"></div>
+    <div class="note">Behavioural (averaged) simulation, not switching-level. The output follows the FHA steady-state gain of the Fig. 12 model with a 0.2 ms first-order lag. A PI controller sets f<sub>s</sub> to regulate V<sub>O</sub> = 206 V, limited to 0.5–5·F<sub>R</sub>. The lag, controller gains, frequency limits and V<sub>S</sub> scaling are illustrative choices, not values from the paper. FHA has no losses, so the size of the overshoot is exaggerated, especially at large C<sub>jc</sub>. The direction of the failure is what matters: once f<sub>s</sub> passes the gain minimum, raising it raises V<sub>O</sub>. Red = with your C<sub>jc</sub> · dashed grey = C<sub>jc</sub> = 0.</div>
+  </div>
 
   <div class="why">
     <div id="w1"></div>
@@ -263,6 +291,7 @@ function update(){
     <li><b>Low-Q design</b>.</li></ul>
     The paper's conclusion: limiting F<sub>s,max</sub> with a start-up circuit is the practical solution.`;
 
+  updateStep(cj,opt);
   drawCircuit({cj:(cj*1e9).toFixed(1),ro:fR(ro),J:opt.J});
   drawAC({L:opt.L,T:opt.T,J:opt.J,cjeq:(cjeq*1e9).toFixed(2),rac:fR(n2*8*ro/Math.PI**2),fjc:opt.J&&cj>0?fmt(FJC):'—'});
 }
@@ -270,6 +299,65 @@ function update(){
 document.getElementById('foot').innerHTML=`<b>Source:</b> B.-H. Lee et al., IEEE INTELEC 2009, <a href="https://doi.org/10.1109/INTLEC.2009.5351740">doi:10.1109/INTLEC.2009.5351740</a>. Parameter values, equations and conclusions are taken from the paper. The circuit drawings, code and curves on this page are an independent re-implementation, not reproductions of the paper's figures. The parameters are Table 1's PDP column (V<sub>S</sub> 385 V, V<sub>O</sub> 206 V, L<sub>R</sub> 20 µH, C<sub>R</sub> 94 nF, L<sub>M</sub> 310 µH, L<sub>lks</sub> 1.3 µH, N<sub>P</sub>:N<sub>S</sub> 23:21, center-tap), with C<sub>TR</sub> 10 pF as in Sec. II-B. The gain is computed numerically from the Fig. 12 circuit, which is equivalent to eq. (8).
 <br><b>Reproduction note:</b> with these values, the model matches the paper's Fig. 13(b) within about ±0.04 (e.g. at F<sub>s</sub>/F<sub>R</sub> = 5, R<sub>O</sub> = 100 Ω: 3 nF → 1.16 vs ≈1.20 in the paper, 2 nF → 1.02 vs ≈1.04, 0.5 nF → 0.82 vs ≈0.84). To match, the plotted C<sub>jc</sub> enters as C<sub>jc</sub>·(N<sub>S</sub>/N<sub>P</sub>)², without the center-tap factor 2 of eq. (12). The paper does not state which value its figures use, so read the slider as the paper's plotted C<sub>jc</sub>. Fig. 13(a) is matched for heavy loads; its near-no-load curve (R<sub>O</sub> = 10 kΩ) rises slightly more in the paper than here.`;
 
+
+// ---------- load-step simulation (behavioural, averaged) ----------
+const VON=206, T1=2, T2=9, TEND=14;
+function simStep(Cjc,opt,Vs,Rl){
+  const Mref=385/Vs, tau=0.2e-3, kp=5, ki=40000, dt=5e-6, lo=Math.log(0.5), hi=Math.log(5);
+  const cl=x=>Math.min(hi,Math.max(lo,x));
+  const R=ms=>(ms>=T1&&ms<T2)?Rl:100;
+  let u=hi; for(let x=1;x<=5;x+=0.005){ if(gain(x,100,Cjc,opt)<=Mref){u=Math.log(x);break;} }
+  let Vo=VON*gain(Math.exp(u),100,Cjc,opt)/Mref, integ=u;
+  const t=[],v=[],f=[];
+  for(let k=0;k*dt<=TEND*1e-3+1e-12;k++){
+    const ms=k*dt*1e3, e=(Vo-VON)/VON;
+    integ=cl(integ+ki*e*dt); u=cl(integ+kp*e);
+    Vo+=(VON*gain(Math.exp(u),R(ms),Cjc,opt)/Mref-Vo)*dt/tau;
+    if(k%10===0){t.push(ms);v.push(Vo);f.push(Math.exp(u));}
+  }
+  return {t,v,f,Mref};
+}
+const shade={id:'shade',beforeDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}}=ch;
+  const x1=x.getPixelForValue(T1),x2=x.getPixelForValue(T2);ctx.save();ctx.fillStyle='rgba(214,69,69,.06)';
+  ctx.fillRect(x1,a.top,x2-x1,a.bottom-a.top);ctx.fillStyle='#d64545';ctx.font='11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('light load',(x1+x2)/2,a.top+12);ctx.restore();}};
+const mk=(id,ytitle)=>new Chart(document.getElementById(id),{type:'line',data:{datasets:[]},
+  options:{animation:false,maintainAspectRatio:false,parsing:false,elements:{point:{radius:0}},interaction:{mode:'nearest',intersect:false},
+  scales:{x:{type:'linear',min:0,max:TEND,title:{display:true,text:'time (ms)'}},y:{title:{display:true,text:ytitle}}},
+  plugins:{legend:{labels:{filter:i=>!i.text.startsWith('_'),boxHeight:2}},tooltip:{callbacks:{title:t=>t[0].parsed.x.toFixed(2)+' ms',label:t=>t.dataset.label.replace(/^_/,'')+': '+t.parsed.y.toFixed(2)}}}},plugins:[shade]});
+const cVo=mk('svo','Vo (V)'), cFs=mk('sfs','Fs / FR');
+function updateStep(cj,opt){
+  const vs=+document.getElementById('vs').value, rl=100*Math.pow(100,+document.getElementById('rl').value);
+  document.getElementById('v-vs').textContent=vs+' V';
+  document.getElementById('v-rl').textContent=fR(rl);
+  const a=simStep(cj,opt,vs,rl), b=simStep(0,{...opt,J:false},vs,rl);
+  document.getElementById('v-mref').textContent=a.Mref.toFixed(3);
+  const xy=(t,y)=>t.map((x,i)=>({x,y:y[i]}));
+  const lab=opt.J?`Cjc = ${(cj*1e9).toFixed(1)} nF`:'Cjc off';
+  cVo.data.datasets=[{label:lab,data:xy(a.t,a.v),borderColor:'#d64545',borderWidth:2.2},
+    {label:'Cjc = 0',data:xy(b.t,b.v),borderColor:'#7b8a97',borderWidth:1.5,borderDash:[6,4]},
+    {label:'_target',data:[{x:0,y:VON},{x:TEND,y:VON}],borderColor:'#1f9d55',borderWidth:1,borderDash:[2,2]}];
+  const all=a.v.concat(b.v); cVo.options.scales.y.min=Math.floor(Math.min(...all,VON)/5)*5-5; cVo.options.scales.y.max=Math.ceil(Math.max(...all,VON)/5)*5+5;
+  cFs.data.datasets=[{label:lab,data:xy(a.t,a.f),borderColor:'#d64545',borderWidth:2.2},
+    {label:'Cjc = 0',data:xy(b.t,b.f),borderColor:'#7b8a97',borderWidth:1.5,borderDash:[6,4]},
+    {label:'_fmax',data:[{x:0,y:5},{x:TEND,y:5}],borderColor:'#0f2a44',borderWidth:1,borderDash:[2,2]}];
+  cFs.options.scales.y.min=0.5; cFs.options.scales.y.max=5.3;
+  cVo.update(); cFs.update();
+  const win=(r)=>r.v.filter((_,i)=>r.t[i]>=T1&&r.t[i]<T2);
+  const pk=r=>Math.max(...win(r)), endL=r=>r.v[r.t.findIndex(x=>x>=T2)-1], sat=r=>r.f[r.t.findIndex(x=>x>=T2)-1]>4.99;
+  const startOK=Math.abs(a.v[0]-VON)<0.5;
+  const ok=Math.abs(endL(a)-VON)<1;
+  document.getElementById('sout').innerHTML=`
+    <div class="kpi"><div class="l">Full load before the step</div><div class="n">${a.v[0].toFixed(1)} V</div>
+      <div class="s ${startOK?'ok':'bad'}">${startOK?'✓ Regulated':'✗ Cannot reach the target even at full load: gain never drops to '+a.Mref.toFixed(3)}</div></div>
+    <div class="kpi"><div class="l">Peak V<sub>O</sub> during light load</div><div class="n">${pk(a).toFixed(1)} V</div>
+      <div class="s">${((pk(a)/VON-1)*100).toFixed(1)}% over 206 V · C<sub>jc</sub> = 0: ${pk(b).toFixed(1)} V</div></div>
+    <div class="kpi"><div class="l">V<sub>O</sub> at end of light load (8.9 ms)</div><div class="n">${endL(a).toFixed(1)} V</div>
+      <div class="s ${ok?'ok':'bad'}">${ok?'✓ Back in regulation':(sat(a)?'✗ f<sub>s</sub> pinned at 5·F<sub>R</sub>: raising f<sub>s</sub> past the gain minimum <i>raised</i> the gain, so the loop ran away':'✗ Not regulated')}</div></div>`;
+}
+document.querySelectorAll('button.pre').forEach(b=>b.addEventListener('click',()=>{
+  document.getElementById('pJ').checked=true;const s=document.getElementById('cj');s.value=b.dataset.c;s.dispatchEvent(new Event('input'));}));
+['vs','rl'].forEach(id=>document.getElementById(id).addEventListener('input',update));
 let hotT;
 ['cj','ro'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{
   if(id==='cj'){['circ','ac'].forEach(k=>document.getElementById(k).classList.add('hot'));clearTimeout(hotT);
