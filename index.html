@@ -121,19 +121,27 @@ button.pre:hover{border-color:var(--red);color:var(--red)}
           <button class="pre" data-c="3">C<sub>jc</sub> = 3 nF</button></div>
         <small>Sets the C<sub>jc</sub> slider at the top</small></div>
     </div>
+    <div style="display:flex;gap:6px;margin:2px 0 8px">
+      <button class="pre mode on" data-m="ss">V<sub>out</sub> fixed (steady state)</button>
+      <button class="pre mode" data-m="tr">Transient (time domain)</button>
+      <span style="flex:1"></span>
+      <button class="pre on" id="zoom" style="min-width:96px">🔍 Zoom: on</button>
+    </div>
+    <div id="trctl" style="display:none">
     <div style="display:flex;align-items:center;gap:10px;margin:4px 0 8px">
       <button class="pre" id="play" style="min-width:74px">▶ Play</button>
       <input type="range" id="tt" min="0" max="14" step="0.02" value="0" style="flex:1;accent-color:#0f2a44">
       <b id="v-tt" style="font-variant-numeric:tabular-nums;min-width:62px;text-align:right;color:#0f2a44"></b>
-      <button class="pre on" id="zoom" style="min-width:96px">🔍 Zoom: on</button>
+    </div>
     </div>
     <div id="phase" style="font-size:13.5px;background:#f4f7f9;border-radius:8px;padding:8px 12px;margin-bottom:8px;min-height:40px"></div>
     <div class="stepcharts">
       <div><div class="chartbox" style="height:330px"><canvas id="sg"></canvas></div></div>
-      <div><div class="chartbox" style="height:330px"><canvas id="svo"></canvas></div></div>
+      <div><div class="chartbox" id="boxvo" style="height:330px;display:none"><canvas id="svo"></canvas></div>
+           <div class="chartbox" id="boxreq" style="height:330px"><canvas id="sreq"></canvas></div></div>
     </div>
     <div class="out" id="sout" style="margin-top:10px"></div>
-    <div class="note">Behavioural (averaged) simulation, not switching-level. The output follows the FHA steady-state gain of the Fig. 12 model with a 0.2 ms first-order lag. A PI controller sets f<sub>s</sub> to regulate V<sub>O</sub> = 206 V, limited to 0.5–5·F<sub>R</sub>. The lag, controller gains, frequency limits and V<sub>S</sub> scaling are illustrative choices, not values from the paper. FHA has no losses, so the size of the overshoot is exaggerated, especially at large C<sub>jc</sub>. The direction of the failure is what matters: once f<sub>s</sub> passes the gain minimum, raising it raises V<sub>O</sub>. Left: the active load's curve is drawn bold, and the dot is the operating point (f<sub>s</sub>, gain at the present load), with its recent path as a trail. Right: V<sub>O</sub>(t) with your C<sub>jc</sub> (red) and with C<sub>jc</sub> = 0 (dashed grey).</div>
+    <div class="note"><b>V<sub>out</sub> fixed mode:</b> each operating point is where that load's FHA gain curve (Fig. 12 model) crosses the gain needed for V<sub>O</sub> = 206 V. These are exact steady-state solutions, with no controller model involved. <b>Transient mode:</b> a behavioural (averaged) simulation, not switching-level. The output follows the FHA steady-state gain of the Fig. 12 model with a 0.2 ms first-order lag. A PI controller sets f<sub>s</sub> to regulate V<sub>O</sub> = 206 V, limited to 0.5–5·F<sub>R</sub>. The lag, controller gains, frequency limits and V<sub>S</sub> scaling are illustrative choices, not values from the paper. FHA has no losses, so the size of the overshoot is exaggerated, especially at large C<sub>jc</sub>. The direction of the failure is what matters: once f<sub>s</sub> passes the gain minimum, raising it raises V<sub>O</sub>. Left: the active load's curve is drawn bold, and the dot is the operating point (f<sub>s</sub>, gain at the present load), with its recent path as a trail. Right: V<sub>O</sub>(t) with your C<sub>jc</sub> (red) and with C<sub>jc</sub> = 0 (dashed grey).</div>
   </div>
 
   <div class="why">
@@ -329,7 +337,7 @@ const shade={id:'shade',beforeDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}
   const x1=x.getPixelForValue(T1),x2=x.getPixelForValue(T2);ctx.save();ctx.fillStyle='rgba(214,69,69,.06)';
   ctx.fillRect(x1,a.top,x2-x1,a.bottom-a.top);ctx.fillStyle='#d64545';ctx.font='11px sans-serif';ctx.textAlign='center';
   ctx.fillText('light load',(x1+x2)/2,a.top+12);ctx.restore();}};
-const ST={now:0,sim:null,ref:null,curves:null,rl:2000,playing:false,zoom:true};
+const ST={now:0,sim:null,ref:null,curves:null,rl:2000,playing:false,zoom:true,mode:'ss'};
 const mk=(id,ytitle,xt,xmin,xmax,plug)=>new Chart(document.getElementById(id),{type:'line',data:{datasets:[]},
   options:{animation:false,maintainAspectRatio:false,parsing:false,elements:{point:{radius:0}},interaction:{mode:'nearest',intersect:false},
   scales:{x:{type:'linear',min:xmin,max:xmax,title:{display:true,text:xt}},y:{title:{display:true,text:ytitle}}},
@@ -337,7 +345,7 @@ const mk=(id,ytitle,xt,xmin,xmax,plug)=>new Chart(document.getElementById(id),{t
 const playhead={id:'playhead',afterDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}}=ch;const px=x.getPixelForValue(ST.now);
   ctx.save();ctx.strokeStyle='#0f2a44';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.restore();}};
 const fshift={id:'fshift',afterDatasetsDraw(ch){
-  if(!ST.sim)return; const {ctx,chartArea:a,scales:{x,y}}=ch;
+  if(!ST.sim||ST.mode!=='tr')return; const {ctx,chartArea:a,scales:{x,y}}=ch;
   const f0=ST.sim.f[0], k=Math.min(ST.sim.t.length-1,Math.round(ST.now/(ST.sim.t[1]-ST.sim.t[0]))), f1=ST.sim.f[k];
   const line=(f,col,txt,yy)=>{if(f<x.min||f>x.max)return;const px=x.getPixelForValue(f);ctx.strokeStyle=col;ctx.setLineDash([4,3]);ctx.lineWidth=1.3;
     ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=col;ctx.font='bold 11px sans-serif';
@@ -382,9 +390,11 @@ function updateStep(cj,opt){
       <div class="s">${((pk(a)/VON-1)*100).toFixed(1)}% over 206 V · C<sub>jc</sub> = 0: ${pk(b).toFixed(1)} V</div></div>
     <div class="kpi"><div class="l">V<sub>O</sub> at end of light load (8.9 ms)</div><div class="n">${endL(a).toFixed(1)} V</div>
       <div class="s ${ok?'ok':'bad'}">${ok?'✓ Back in regulation':(sat(a)?'✗ f<sub>s</sub> pinned at 5·F<sub>R</sub>: raising f<sub>s</sub> past the gain minimum <i>raised</i> the gain, so the loop ran away':'✗ Not regulated')}</div></div>`;
-  drawStepFrame();
+  ST.trKpi=document.getElementById('sout').innerHTML;
+  renderStep();
 }
 function drawStepFrame(){
+  if(ST.trKpi)document.getElementById('sout').innerHTML=ST.trKpi;
   const a=ST.sim, now=ST.now, k=Math.min(a.t.length-1,Math.round(now/(a.t[1]-a.t[0])));
   const light=loadAt(now)!==100, fs=a.f[k], Mop=gain(fs,loadAt(now),ST.cj,ST.opt);
   const trail=[];for(let i=Math.max(0,k-60);i<=k;i++)trail.push({x:a.f[i],y:gain(a.f[i],loadAt(a.t[i]),ST.cj,ST.opt)});
@@ -426,7 +436,95 @@ function drawStepFrame(){
 }
 document.getElementById('tt').addEventListener('input',e=>{ST.now=+e.target.value;stopPlay();drawStepFrame();});
 document.getElementById('zoom').addEventListener('click',e=>{ST.zoom=!ST.zoom;e.target.classList.toggle('on',ST.zoom);
-  e.target.textContent=ST.zoom?'🔍 Zoom: on':'🔍 Zoom: off';drawStepFrame();});
+  e.target.textContent=ST.zoom?'🔍 Zoom: on':'🔍 Zoom: off';renderStep();});
+
+// ---------- Vout fixed: steady-state operating points ----------
+function fsFor(M,Ro,Cjc,opt){ // first crossing gain<=M scanning up from 0.5·FR, refined by bisection
+  let px=0.5,pg=gain(px,Ro,Cjc,opt); if(pg<=M) return 0.5;
+  for(let x=0.51;x<=5.0001;x+=0.01){const g=gain(x,Ro,Cjc,opt);
+    if(g<=M){let a=px,b=x;for(let i=0;i<30;i++){const m=(a+b)/2;(gain(m,Ro,Cjc,opt)<=M?b=m:a=m);}return (a+b)/2;}px=x;}
+  return null;
+}
+const cReq=new Chart(document.getElementById('sreq'),{type:'line',data:{datasets:[]},
+  options:{animation:false,maintainAspectRatio:false,parsing:false,spanGaps:false,elements:{point:{radius:0}},interaction:{mode:'nearest',intersect:false},
+  scales:{x:{type:'logarithmic',min:100,max:10000,title:{display:true,text:'Load RO (Ω), log scale'},ticks:{callback:v=>[100,200,500,1000,2000,5000,10000].includes(+v)?fR(+v):''}},
+    y:{title:{display:true,text:'fs needed for Vo = 206 V (kHz)'}}},
+  plugins:{legend:{labels:{filter:i=>!i.text.startsWith('_'),boxHeight:2}},tooltip:{filter:i=>!i.dataset.label.startsWith('_'),callbacks:{title:t=>'RO = '+fR(t[0].parsed.x),label:t=>t.dataset.label+': '+t.parsed.y.toFixed(1)+' kHz'}}}},
+  plugins:[{id:'rmark',afterDatasetsDraw(ch){if(ST.mode!=='ss')return;const {ctx,chartArea:a,scales:{x}}=ch;ctx.save();
+    [[100,'#0f2a44','full load'],[ST.rl,'#d98a1c','light load']].forEach(([r,c,t])=>{const px=x.getPixelForValue(r);ctx.strokeStyle=c;ctx.setLineDash([4,3]);
+      ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=c;ctx.font='bold 11px sans-serif';
+      ctx.textAlign=px>a.right-70?'right':'left';ctx.fillText(t,px+(px>a.right-70?-4:4),a.top+12);});
+    if(ST.noSol){const px=x.getPixelForValue(ST.noSol);ctx.fillStyle='rgba(214,69,69,.08)';ctx.fillRect(px,a.top,a.right-px,a.bottom-a.top);
+      ctx.fillStyle='#d64545';ctx.textAlign='center';ctx.fillText('no fs holds Vo here',(px+a.right)/2,a.top+30);}
+    ctx.restore();}}]});
+function drawSteady(){
+  const cj=ST.cj,opt=ST.opt,Mref=ST.sim.Mref,rl=ST.rl, o0={...opt,J:false};
+  const fF=fsFor(Mref,100,cj,opt), fL=fsFor(Mref,rl,cj,opt), fF0=fsFor(Mref,100,0,o0), fL0=fsFor(Mref,rl,0,o0);
+  const lab=opt.J?` (Cjc ${(cj*1e9).toFixed(1)} nF)`:'';
+  const pts=[];
+  if(fF)pts.push({x:fF,y:Mref}); 
+  cG.data.datasets=[
+    {label:'Full load 100 Ω'+lab,data:ST.curves.full,borderColor:'#0f2a44',borderWidth:2.6},
+    {label:`Light load ${fR(rl)}`+lab,data:ST.curves.light,borderColor:'#d98a1c',borderWidth:2.6},
+    {label:'Light load, Cjc = 0',data:ST.curves.light0,borderColor:'rgba(123,138,151,.7)',borderWidth:1.2,borderDash:[6,4]},
+    {label:'Vo = 206 V → gain M = '+Mref.toFixed(3),data:[{x:0.5,y:Mref},{x:5,y:Mref}],borderColor:'#1f9d55',borderWidth:1.4,borderDash:[3,3]},
+    {label:'_opF',data:fF?[{x:fF,y:Mref}]:[],showLine:false,pointRadius:8,pointBackgroundColor:'#0f2a44',pointBorderColor:'#fff',pointBorderWidth:2},
+    {label:'_opL',data:fL?[{x:fL,y:Mref}]:[],showLine:false,pointRadius:8,pointBackgroundColor:'#d98a1c',pointBorderColor:'#fff',pointBorderWidth:2},
+    {label:'_opL0',data:(opt.J&&fL0)?[{x:fL0,y:Mref}]:[],showLine:false,pointRadius:5,pointBackgroundColor:'#fff',pointBorderColor:'#7b8a97',pointBorderWidth:2}];
+  ST.ssF=fF; ST.ssL=fL;
+  // axes
+  if(ST.zoom){
+    const xs=[fF,fL,opt.J?fL0:null].filter(v=>v); let x0=Math.min(...xs), x1=Math.max(...xs);
+    if(!fL){x1=5;} const pad=Math.max(0.1,(x1-x0)*0.25); x0=Math.max(0.5,x0-pad); x1=Math.min(5,x1+pad);
+    const inW=[...ST.curves.full,...ST.curves.light,...ST.curves.light0].filter(p=>p.x>=x0&&p.x<=x1).map(p=>p.y).concat([Mref]);
+    const lo=Math.min(...inW),hi=Math.max(...inW),py=Math.max(0.008,(hi-lo)*0.12);
+    Object.assign(cG.options.scales.x,{min:x0,max:x1}); Object.assign(cG.options.scales.y,{min:lo-py,max:hi+py*2.4});
+  } else {
+    const ys=ST.curves.full.concat(ST.curves.light).map(p=>p.y);
+    Object.assign(cG.options.scales.x,{min:0.5,max:5});
+    Object.assign(cG.options.scales.y,{min:Math.min(0.7,Math.floor(Math.min(...ys)*20)/20),max:Math.max(1.3,Math.min(3,Math.ceil(Math.max(...ys)*10)/10))});
+  }
+  cG.options.scales.x.ticks={callback:v=>(+v).toFixed(ST.zoom?2:1)};
+  cG.update();
+  // required fs vs load
+  const RS=[...Array(70)].map((_,i)=>100*Math.pow(100,i/69));
+  const req=RS.map(r=>{const f=fsFor(Mref,r,cj,opt);return {x:r,y:f?f*FR/1e3:null};});
+  const req0=RS.map(r=>{const f=fsFor(Mref,r,0,o0);return {x:r,y:f?f*FR/1e3:null};});
+  const firstNo=req.find(p=>p.y===null); ST.noSol=firstNo?firstNo.x:null;
+  cReq.data.datasets=[{label:opt.J?`Cjc = ${(cj*1e9).toFixed(1)} nF`:'Cjc off',data:req,borderColor:'#d64545',borderWidth:2.4},
+    {label:'Cjc = 0',data:req0,borderColor:'#7b8a97',borderWidth:1.5,borderDash:[6,4]}];
+  const ally=req.concat(req0).map(p=>p.y).filter(v=>v!==null);
+  cReq.options.scales.y.min=Math.floor(Math.min(...ally)/10)*10-10; cReq.options.scales.y.max=Math.ceil(Math.max(...ally)/10)*10+10;
+  cReq.update();
+  // narration + KPIs
+  const k=v=>(v*FR/1e3).toFixed(1)+' kHz';
+  let txt;
+  if(!fF) txt=`<b>V<sub>out</sub> can't be held even at full load.</b> The full-load curve never drops to M = ${Mref.toFixed(3)}, so no switching frequency gives 206 V.`;
+  else if(fL) txt=`<b>V<sub>out</sub> fixed at 206 V.</b> Full load needs f<sub>s</sub> = ${k(fF)}. At ${fR(rl)}, the light-load curve crosses the target further right, at ${k(fL)}. The controller must shift f<sub>s</sub> by <b>${((fL-fF)*FR/1e3>=0?'+':'')}${((fL-fF)*FR/1e3).toFixed(1)} kHz</b>.`+(opt.J&&fL0?` Without C<sub>jc</sub> it would be ${k(fL0)} (Δ ${((fL0-fF0)*FR/1e3).toFixed(1)} kHz from ${k(fF0)}).`:'');
+  else txt=`<b>V<sub>out</sub> can't be held at light load.</b> Full load needs f<sub>s</sub> = ${k(fF)}, but C<sub>jc</sub> bends the ${fR(rl)} curve back up (min ${Math.min(...ST.curves.light.filter(p=>p.x>=1).map(p=>p.y)).toFixed(3)}), so it never reaches M = ${Mref.toFixed(3)}. No frequency holds 206 V.`+(fL0?` Without C<sub>jc</sub>, ${k(fL0)} would do it.`:'')+(ST.noSol?` On the right, regulation ends beyond R<sub>O</sub> ≈ ${fR(ST.noSol)}.`:'');
+  document.getElementById('phase').innerHTML=txt;
+  document.getElementById('sout').innerHTML=`
+    <div class="kpi"><div class="l">f<sub>s</sub> at full load (100 Ω)</div><div class="n">${fF?k(fF):'—'}</div><div class="s">${fF?(fF).toFixed(3)+'·F<sub>R</sub>':'<span class="bad">no solution</span>'}</div></div>
+    <div class="kpi"><div class="l">f<sub>s</sub> at light load (${fR(rl)})</div><div class="n">${fL?k(fL):'—'}</div><div class="s">${fL?(fL).toFixed(3)+'·F<sub>R</sub>':'<span class="bad">no solution: V<sub>out</sub> cannot be held</span>'}${opt.J?` · C<sub>jc</sub> = 0: ${fL0?k(fL0):'—'}`:''}</div></div>
+    <div class="kpi"><div class="l">Frequency shift Δf<sub>s</sub></div><div class="n">${fF&&fL?(((fL-fF)*FR/1e3>=0?'+':'')+((fL-fF)*FR/1e3).toFixed(1)+' kHz'):'∞'}</div><div class="s ${fF&&fL?'ok':'bad'}">${fF&&fL?'✓ Regulation possible':'✗ No frequency gives the target gain'}</div></div>`;
+}
+const sspan={id:'sspan',afterDatasetsDraw(ch){
+  if(ST.mode!=='ss'||!ST.ssF)return; const {ctx,chartArea:a,scales:{x,y}}=ch; const yy=y.getPixelForValue(ST.sim.Mref)-26;
+  const p0=x.getPixelForValue(ST.ssF); ctx.save();
+  if(ST.ssL){const p1=x.getPixelForValue(ST.ssL);ctx.strokeStyle='#d64545';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(p0,yy);ctx.lineTo(p1,yy);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(p1,yy);ctx.lineTo(p1-7,yy-5);ctx.lineTo(p1-7,yy+5);ctx.closePath();ctx.fillStyle='#d64545';ctx.fill();
+    ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.fillText(`Δfs = +${((ST.ssL-ST.ssF)*FR/1e3).toFixed(1)} kHz`,(p0+p1)/2,yy-7);}
+  else{ctx.fillStyle='#d64545';ctx.font='bold 12px sans-serif';ctx.textAlign='left';ctx.fillText('light load: no crossing → Vout cannot be held',Math.min(p0+8,a.right-260),yy);}
+  ctx.font='bold 11px sans-serif';ctx.fillStyle='#0f2a44';ctx.textAlign='center';ctx.fillText((ST.ssF*FR/1e3).toFixed(1)+' kHz',p0,y.getPixelForValue(ST.sim.Mref)+22);
+  if(ST.ssL){ctx.fillStyle='#b8730f';ctx.fillText((ST.ssL*FR/1e3).toFixed(1)+' kHz',x.getPixelForValue(ST.ssL),y.getPixelForValue(ST.sim.Mref)+22);}
+  ctx.restore();}};
+cG.config.plugins.push(sspan);
+document.querySelectorAll('button.mode').forEach(b=>b.addEventListener('click',()=>{
+  ST.mode=b.dataset.m; document.querySelectorAll('button.mode').forEach(x=>x.classList.toggle('on',x===b));
+  const tr=ST.mode==='tr'; document.getElementById('trctl').style.display=tr?'':'none';
+  document.getElementById('boxvo').style.display=tr?'':'none'; document.getElementById('boxreq').style.display=tr?'none':'';
+  if(!tr)stopPlay(); renderStep();}));
+function renderStep(){ if(ST.mode==='ss') drawSteady(); else { drawStepFrame(); } }
 let raf=null,lastTs=0;
 function stopPlay(){ST.playing=false;cancelAnimationFrame(raf);document.getElementById('play').textContent='▶ Play';}
 document.getElementById('play').addEventListener('click',()=>{
