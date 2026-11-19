@@ -61,6 +61,7 @@ footer{font-size:11.5px;color:var(--mut);padding:4px 22px 18px;max-width:1100px;
 .stepcharts{display:grid;grid-template-columns:1.25fr 1fr;gap:12px}
 @media(max-width:800px){.stepcharts{grid-template-columns:1fr}}
 button.pre{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;font-size:12.5px;cursor:pointer;color:var(--navy)}
+button.pre.on{background:#0f2a44;color:#fff;border-color:#0f2a44}
 button.pre:hover{border-color:var(--red);color:var(--red)}
 </style>
 </head>
@@ -124,6 +125,7 @@ button.pre:hover{border-color:var(--red);color:var(--red)}
       <button class="pre" id="play" style="min-width:74px">▶ Play</button>
       <input type="range" id="tt" min="0" max="14" step="0.02" value="0" style="flex:1;accent-color:#0f2a44">
       <b id="v-tt" style="font-variant-numeric:tabular-nums;min-width:62px;text-align:right;color:#0f2a44"></b>
+      <button class="pre on" id="zoom" style="min-width:96px">🔍 Zoom: on</button>
     </div>
     <div id="phase" style="font-size:13.5px;background:#f4f7f9;border-radius:8px;padding:8px 12px;margin-bottom:8px;min-height:40px"></div>
     <div class="stepcharts">
@@ -327,14 +329,30 @@ const shade={id:'shade',beforeDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}
   const x1=x.getPixelForValue(T1),x2=x.getPixelForValue(T2);ctx.save();ctx.fillStyle='rgba(214,69,69,.06)';
   ctx.fillRect(x1,a.top,x2-x1,a.bottom-a.top);ctx.fillStyle='#d64545';ctx.font='11px sans-serif';ctx.textAlign='center';
   ctx.fillText('light load',(x1+x2)/2,a.top+12);ctx.restore();}};
-const ST={now:0,sim:null,ref:null,curves:null,rl:2000,playing:false};
+const ST={now:0,sim:null,ref:null,curves:null,rl:2000,playing:false,zoom:true};
 const mk=(id,ytitle,xt,xmin,xmax,plug)=>new Chart(document.getElementById(id),{type:'line',data:{datasets:[]},
   options:{animation:false,maintainAspectRatio:false,parsing:false,elements:{point:{radius:0}},interaction:{mode:'nearest',intersect:false},
   scales:{x:{type:'linear',min:xmin,max:xmax,title:{display:true,text:xt}},y:{title:{display:true,text:ytitle}}},
   plugins:{legend:{labels:{filter:i=>!i.text.startsWith('_'),boxHeight:2}},tooltip:{filter:i=>!i.dataset.label.startsWith('_'),callbacks:{label:t=>t.dataset.label+': '+t.parsed.y.toFixed(3)}}}},plugins:plug});
 const playhead={id:'playhead',afterDatasetsDraw(ch){const {ctx,chartArea:a,scales:{x}}=ch;const px=x.getPixelForValue(ST.now);
   ctx.save();ctx.strokeStyle='#0f2a44';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.restore();}};
-const cG=mk('sg','Gain (normalized)','Fs / FR',0.5,5,[]), cVo=mk('svo','Vo (V)','time (ms)',0,TEND,[shade,playhead]);
+const fshift={id:'fshift',afterDatasetsDraw(ch){
+  if(!ST.sim)return; const {ctx,chartArea:a,scales:{x,y}}=ch;
+  const f0=ST.sim.f[0], k=Math.min(ST.sim.t.length-1,Math.round(ST.now/(ST.sim.t[1]-ST.sim.t[0]))), f1=ST.sim.f[k];
+  const line=(f,col,txt,yy)=>{if(f<x.min||f>x.max)return;const px=x.getPixelForValue(f);ctx.strokeStyle=col;ctx.setLineDash([4,3]);ctx.lineWidth=1.3;
+    ctx.beginPath();ctx.moveTo(px,a.top);ctx.lineTo(px,a.bottom);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=col;ctx.font='bold 11px sans-serif';
+    ctx.textAlign=px>a.right-90?'right':'left';ctx.fillText(txt,px+(px>a.right-90?-4:4),a.bottom-yy);};
+  ctx.save();
+  line(f0,'#0f2a44',`full load: ${(f0*FR/1e3).toFixed(1)} kHz`,8);
+  if(Math.abs(f1-f0)>1e-3){
+    line(f1,'#d64545',`now: ${(f1*FR/1e3).toFixed(1)} kHz`,24);
+    const p0=x.getPixelForValue(Math.max(x.min,Math.min(x.max,f0))),p1=x.getPixelForValue(Math.max(x.min,Math.min(x.max,f1))),yy=a.top+16;
+    ctx.strokeStyle='#d64545';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(p0,yy);ctx.lineTo(p1,yy);ctx.stroke();
+    const dir=Math.sign(p1-p0)||1;ctx.beginPath();ctx.moveTo(p1,yy);ctx.lineTo(p1-7*dir,yy-5);ctx.lineTo(p1-7*dir,yy+5);ctx.closePath();ctx.fillStyle='#d64545';ctx.fill();
+    const d=(f1-f0)*FR/1e3;ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.fillText(`Δfs = ${d>=0?'+':''}${d.toFixed(1)} kHz`,(p0+p1)/2,yy-7);
+  }
+  ctx.restore();}};
+const cG=mk('sg','Gain (normalized)',`Fs / FR   (FR = ${(FR/1e3).toFixed(1)} kHz)`,0.5,5,[fshift]), cVo=mk('svo','Vo (V)','time (ms)',0,TEND,[shade,playhead]);
 const loadAt=ms=>(ms>=T1&&ms<T2)?ST.rl:100;
 function updateStep(cj,opt){
   const vs=+document.getElementById('vs').value, rl=100*Math.pow(100,+document.getElementById('rl').value);
@@ -378,9 +396,19 @@ function drawStepFrame(){
     {label:'Target gain M = '+a.Mref.toFixed(3),data:[{x:0.5,y:a.Mref},{x:5,y:a.Mref}],borderColor:'#1f9d55',borderWidth:1.2,borderDash:[3,3]},
     {label:'_trail',data:trail,borderColor:'rgba(214,69,69,.45)',borderWidth:2},
     {label:'_op',data:[{x:fs,y:Mop}],showLine:false,pointRadius:8,pointBackgroundColor:'#d64545',pointBorderColor:'#fff',pointBorderWidth:2}];
-  const ys=ST.curves.full.concat(ST.curves.light).map(p=>p.y).filter((_,i)=>true);
-  cG.options.scales.y.min=Math.min(0.7,Math.floor(Math.min(...ys)*20)/20);
-  cG.options.scales.y.max=Math.max(1.3,Math.min(3,Math.ceil(Math.max(...ys.filter((y,i)=>true))*10)/10));
+  if(ST.zoom){
+    const fmin=Math.min(...a.f), fmax=Math.max(...a.f), pad=Math.max(0.12,(fmax-fmin)*0.15);
+    const x0=Math.max(0.5,fmin-pad), x1=Math.min(5,fmax+pad);
+    const inW=[...ST.curves.full,...ST.curves.light,...ST.curves.light0].filter(p=>p.x>=x0&&p.x<=x1).map(p=>p.y).concat([a.Mref]);
+    const lo=Math.min(...inW), hi=Math.max(...inW), py=Math.max(0.01,(hi-lo)*0.12);
+    cG.options.scales.x.min=x0; cG.options.scales.x.max=x1; cG.options.scales.y.min=lo-py; cG.options.scales.y.max=hi+py*2.2;
+  } else {
+    const ys=ST.curves.full.concat(ST.curves.light).map(p=>p.y);
+    cG.options.scales.x.min=0.5; cG.options.scales.x.max=5;
+    cG.options.scales.y.min=Math.min(0.7,Math.floor(Math.min(...ys)*20)/20);
+    cG.options.scales.y.max=Math.max(1.3,Math.min(3,Math.ceil(Math.max(...ys)*10)/10));
+  }
+  cG.options.scales.x.ticks={callback:v=>(+v).toFixed(ST.zoom?2:1)};
   cG.update(); cVo.update();
   document.getElementById('v-tt').textContent=now.toFixed(2)+' ms';
   document.getElementById('tt').value=now;
@@ -397,6 +425,8 @@ function drawStepFrame(){
   document.getElementById('phase').innerHTML=txt;
 }
 document.getElementById('tt').addEventListener('input',e=>{ST.now=+e.target.value;stopPlay();drawStepFrame();});
+document.getElementById('zoom').addEventListener('click',e=>{ST.zoom=!ST.zoom;e.target.classList.toggle('on',ST.zoom);
+  e.target.textContent=ST.zoom?'🔍 Zoom: on':'🔍 Zoom: off';drawStepFrame();});
 let raf=null,lastTs=0;
 function stopPlay(){ST.playing=false;cancelAnimationFrame(raf);document.getElementById('play').textContent='▶ Play';}
 document.getElementById('play').addEventListener('click',()=>{
